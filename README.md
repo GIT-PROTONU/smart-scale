@@ -49,6 +49,9 @@ Host→firmware: `t` (tare all), `k<ch>:<mass>` (calibrate), `c` (print cal),
 `at0`/`at1` (autotare on boot), `o<ch>:<thr>` (overload threshold).
 Calibration persists in Arduino EEPROM.
 
+The controller firmware lives in the **[LBV1](https://github.com/GIT-PROTONU/LBV1)**
+repository — this project's Arduino Nano sketch is built from it.
+
 ## Deploy to the Pi
 
 Source of truth lives on the device at `/opt/scale/`. The repo's
@@ -95,7 +98,7 @@ Check: `systemctl is-active scale-status` and `curl -s http://127.0.0.1:8080/api
 ```
 scale_status.py     main host program
 ssd1306.py          minimal SSD1306 driver (pure stdlib, fcntl I2C)
-LBV1.ino            firmware entry
+LBV1.ino            firmware entry (see https://github.com/GIT-PROTONU/LBV1)
 firmware/           Arduino Nano firmware (src/, arduino-cli.yaml)
 deploy/             systemd services, sudoers, power-saving docs
 bin/arduino-cli     arduino-cli binary (gitignored)
