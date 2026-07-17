@@ -17,6 +17,8 @@ SNAP = {
     "taresync": "", "taresync_t": 0,
     "tare_locked": False,
     "log_count": 0, "last_log": "", "log_flash": 0.0, "last_log_w": 0.0,
+    "shutting_down": False,
+    "shutdown_hold": 0.0,
 }
 
 LOG_FILE = "/opt/scale/weights.csv"
@@ -24,6 +26,9 @@ LOG_MIN_KG = 20.0
 LOG_SETTLE_S = 2.0          # weight must stay stable this long before logging
 LOG_SETTLE_TOL = 0.3        # kg tolerance for "stable"
 OLED_OFF_S = 40.0           # turn OLED off after this long showing a steady value
+SHUTDOWN_HOLD_S = 5.0        # hold 5-10 kg this long to trigger poweroff
+SHUTDOWN_MIN_KG = 5.0
+SHUTDOWN_MAX_KG = 10.0
 LOG_LOCK = threading.Lock()
 LOG_STATE = {"stable_since": 0.0, "last_val": None, "done": False, "logged_w": 0.0, "logged_at": 0.0}
 
@@ -100,6 +105,7 @@ def scale_reader():
     step_tare_wait = 0.0
     step_tare_tared_at = 0.0
     step_tare_locked = False   # armed-off until weight leaves the scale
+    shutdown_hold_start = 0.0  # weight-in-window start for hold-to-poweroff
     while True:
         port = find_port()
         if port is None:
@@ -199,6 +205,26 @@ def scale_reader():
                             with SNAP_LOCK:
                                 SNAP["taresync"] = ""
                                 SNAP["taresync_t"] = 0
+                    # --- hold-to-poweroff: weight held between 5 and 10 kg
+                    #     for SHUTDOWN_HOLD_S triggers a clean SBC shutdown ---
+                    hw = SNAP["weight_kg"]
+                    if SHUTDOWN_MIN_KG <= hw <= SHUTDOWN_MAX_KG:
+                        if shutdown_hold_start == 0.0:
+                            shutdown_hold_start = now
+                        held = now - shutdown_hold_start
+                        rem = max(0.0, SHUTDOWN_HOLD_S - held)
+                        with SNAP_LOCK:
+                            SNAP["shutdown_hold"] = rem
+                        if held >= SHUTDOWN_HOLD_S:
+                            dbg("hold-shutdown w=%.2f" % hw)
+                            shutdown_hold_start = 0.0
+                            with SNAP_LOCK:
+                                SNAP["shutting_down"] = True
+                            subprocess.Popen(["sudo", "-n", "systemctl", "poweroff"])
+                    else:
+                        if shutdown_hold_start != 0.0:
+                            shutdown_hold_start = 0.0
+                            with SNAP_LOCK: SNAP["shutdown_hold"] = 0.0
                     # --- logging: only after timeout lockout, >min kg, settled,
                     #     exactly ONE entry per step-on session ---
                     w = SNAP["weight_kg"]
@@ -225,7 +251,8 @@ def scale_reader():
                 if len(parts) == 4 and all(p.replace(".","").replace("-","").isdigit() for p in parts):
                     with SNAP_LOCK:
                         SNAP["cal"] = [float(x)/10.0 for x in parts]
-        except Exception:
+        except Exception as _e:
+            dbg("READ ERR %r" % _e)
             try:
                 if ser: ser.close()
             except Exception: pass
@@ -299,11 +326,26 @@ def draw():
             last_change = time.time()
             if not oled_on:
                 d.power(True); oled_on = True
-        elif time.time() - last_change > OLED_OFF_S and oled_on and s["scale_conn"]:
+        elif time.time() - last_change > OLED_OFF_S and oled_on and s["scale_conn"] and not s["shutting_down"]:
             d.power(False); oled_on = False
         if not oled_on:
             time.sleep(0.5); continue
         d.clear()
+        if s["shutting_down"]:
+            if not oled_on:
+                d.power(True); oled_on = True
+            d.text("SHUTTING", 22, 16, 2)
+            d.text("DOWN", 38, 36, 2)
+            d.show()
+            time.sleep(0.5); continue
+        if s["shutdown_hold"] > 0:
+            if not oled_on:
+                d.power(True); oled_on = True
+            d.text("HOLD TO", 28, 6, 2)
+            d.text("SHUTDOWN", 16, 26, 2)
+            d.text("%d" % int(s["shutdown_hold"] + 0.999), 56, 48, 2)
+            d.show()
+            time.sleep(0.2); continue
         if s["scale_conn"]:
             w = s["weight_kg"]
             if time.time() - s["log_flash"] < 3.0:
@@ -547,6 +589,8 @@ class H(BaseHTTPRequestHandler):
                     subprocess.Popen(["sudo","-n","systemctl","reboot"])
                     msg = "SBC restarting"
                 elif cmd == "shutdown":
+                    with SNAP_LOCK:
+                        SNAP["shutting_down"] = True
                     subprocess.Popen(["sudo","-n","systemctl","poweroff"])
                     msg = "SBC shutting down"
                 elif cmd == "clear_log":
@@ -589,9 +633,10 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 def oled_shutdown():
-    # power the display off so it doesn't freeze on the last frame when
-    # the SBC is shut down / the process is killed
+    # clear the display and power it off so it doesn't freeze on the last
+    # frame when the SBC is shut down / the process is killed
     try:
+        d.clear(); d.show()
         d.power(False)
     except Exception:
         pass

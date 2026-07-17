@@ -71,8 +71,18 @@ Text was initially mirrored; fixed by segment remap `0xA0` in `ssd1306.py` init.
 
 ## OLED power management (scale_status.py + ssd1306.py)
 - Driver gained a `power(on)` method (`0xAF`=on / `0xAE`=off, SSD1306 sleep).
-- **Idle-off:** `draw()` turns the OLED off after it shows a steady value (±0.05 kg) for `OLED_OFF_S` (40 s) while `scale_conn` is true. Updates `oled_on`/`last_val`/`last_change` state.
+- **Idle-off:** `draw()` turns the OLED off after it shows a steady value (±0.05 kg) for `OLED_OFF_S` (40 s) while `scale_conn` is true. Updates `oled_on`/`last_val`/`last_change` state. The idle-off is suppressed while `shutting_down` or `shutdown_hold > 0` is set (so the shutdown screens stay lit).
 - **Instant wake:** any weight change (or empty→present) powers the display back on immediately.
-- **Clean shutdown:** `oled_shutdown()` registered via `atexit` + `SIGTERM`/`SIGINT` handlers and a `finally` in the server loop, so the display powers off on SBC shutdown instead of freezing on the last frame.
+- **Clean shutdown:** `oled_shutdown()` registered via `atexit` + `SIGTERM`/`SIGINT` handlers and a `finally` in the server loop, so the display powers off on SBC shutdown instead of freezing on the last frame. `oled_shutdown()` now also `clear()`s the buffer before powering off.
 - `ssd1306.py` lives in `/opt/scale/` alongside `scale_status.py` (imported as `from ssd1306 import SSD1306`) — deploy both files.
+- **Display is rotated 180°:** `ssd1306.py` init uses segment remap `0xA1` + COM scan `0xC0` (was `0xA0`/`0xC8`). Keep both flipped together for a true 180° rotation.
+
+## Shutdown screens (scale_status.py + ssd1306.py)
+- **WebUI shutdown button** (`/api/action?cmd=shutdown`): sets `SNAP["shutting_down"]=True`, then `systemctl poweroff`. OLED shows a `SHUTTING DOWN` screen and stays on (idle-off suppressed) until the SBC powers off; `oled_shutdown()` clears + powers off the display at process exit.
+- **Hold-to-poweroff (hardware trigger):** holding **5–10 kg** on the scale for `SHUTDOWN_HOLD_S` (5 s) triggers a clean `systemctl poweroff`. Implemented in `scale_reader` — tracks `shutdown_hold_start`; `SNAP["shutdown_hold"]` holds the remaining seconds. OLED shows `HOLD TO` / `SHUTDOWN` + live countdown while held; removing the weight cancels (resets). Tunables: `SHUTDOWN_MIN_KG=5.0`, `SHUTDOWN_MAX_KG=10.0`, `SHUTDOWN_HOLD_S=5.0`. The 5–10 kg band does NOT collide with the step-on auto-tare window (opens at >10 kg).
+
+## Reader bug history (avoid repeating)
+- The `scale_reader` loop assigns `w` only inside the `if len(v)==4:` parse branch. Any code that references `w` at the outer loop scope (e.g. the hold-to-poweroff check) MUST read `SNAP["weight_kg"]` directly, never the local `w` — referencing `w` there throws `UnboundLocalError` on non-4-int frames and crash-loops the reader into `serial reopen`. The hold block now uses `hw = SNAP["weight_kg"]`.
+- The reader's broad `except Exception` swallows the real error and just logs `serial reopen`. To debug, it now also logs `READ ERR <exception>` to `/tmp/scale_debug.log`. Check that before assuming a USB/cable fault — a software throw looks identical to a disconnect.
+
 
