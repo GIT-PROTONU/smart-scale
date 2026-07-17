@@ -1,0 +1,20 @@
+# Build artifacts
+firmware/out/
+*.hex
+*.elf
+
+# Large tooling binary (download arduino-cli separately)
+bin/arduino-cli
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Device-specific / local
+*.log
+.DS_Store
+Thumbs.db
+
+# Secrets / local overrides
+.env
+*.local

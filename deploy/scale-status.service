@@ -1,0 +1,16 @@
+[Unit]
+Description=Orange Pi Scale Status (OLED + web)
+DefaultDependencies=no
+After=systemd-udevd.service local-fs.target
+Before=network.target dbus.service systemd-logind.service graphical.target
+
+[Service]
+Type=simple
+User=ibster
+WorkingDirectory=/opt/scale
+ExecStart=/usr/bin/python3 /opt/scale/scale_status.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=sysinit.target

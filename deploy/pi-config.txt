@@ -1,0 +1,28 @@
+=== service ===
+[Unit]
+Description=Orange Pi Scale Status (OLED + web)
+After=network.target
+
+[Service]
+Type=simple
+User=ibster
+WorkingDirectory=/opt/scale
+ExecStart=/usr/bin/python3 /opt/scale/scale_status.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+=== udev ===
+# LBV1 Arduino (CH340) -> stable /dev/scale symlink, group dialout, rw
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", GROUP="dialout", MODE="0664", SYMLINK+="scale"
+=== sudoers ===
+=== i2c overlay in armbianEnv ===
+i2c0
+i2c1
+i2c2
+=== pip list (user) ===
+=== user groups ===
+ibster : ibster tty disk dialout sudo audio video plugdev games users systemd-journal input netdev i2c
+=== wifi iface present ===
+end0 lo wlan0 
